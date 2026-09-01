@@ -1,0 +1,24 @@
+# Maven
+target/
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets — never commit AWS keys or local overrides
+.env
+application-local.yml
+*.pem
+
+# Logs
+*.log
