@@ -23,25 +23,13 @@ import java.time.temporal.ChronoUnit;
 @RequiredArgsConstructor
 public class ReservationService {
 
-    /** Time a PENDING reservation lives before it is expired and its stock returned. */
     private static final long RESERVATION_TTL_MINUTES = 5;
 
     private final ReservationRepository reservationRepository;
     private final InventoryRepository inventoryRepository;
     private final ProductService productService;
+    private final ReservationEventPublisher eventPublisher;
 
-    /**
-     * Reserves stock for a product.
-     *
-     * <p>Idempotency is checked first, outside the inventory lock, so replays
-     * of a completed request never touch inventory. A unique constraint on
-     * {@code idempotency_key} is the safety net if two identical requests
-     * race past the initial lookup.
-     *
-     * <p>Concurrency is handled with {@code SELECT ... FOR UPDATE} on the
-     * inventory row, so transactions targeting the same product serialize
-     * at the database level rather than within a single JVM.
-     */
     @Transactional
     public ReservationResponse reserve(ReservationRequest request, String idempotencyKey) {
         var existing = reservationRepository.findByIdempotencyKey(idempotencyKey);
@@ -73,14 +61,14 @@ public class ReservationService {
         try {
             reservationRepository.save(reservation);
         } catch (DataIntegrityViolationException dup) {
-            // Another request with the same idempotency key inserted first.
-            // Return the persisted row instead of decrementing stock twice.
             log.warn("Idempotency key race detected for key={}, returning existing row", idempotencyKey);
             return toResponse(reservationRepository.findByIdempotencyKey(idempotencyKey)
                     .orElseThrow(() -> dup));
         }
 
         productService.evict(request.productId());
+        eventPublisher.publishReservationCreated(reservation.getId());
+
         return toResponse(reservation);
     }
 
@@ -98,26 +86,36 @@ public class ReservationService {
         return toResponse(reservation);
     }
 
-    /**
-     * Cancels a PENDING reservation and returns its stock to available_qty.
-     * Locks the inventory row before mutating it, same as {@link #reserve}.
-     */
     @Transactional
     public ReservationResponse cancel(Long id) {
         Reservation reservation = reservationRepository.findById(id)
                 .orElseThrow(() -> new ReservationNotFoundException(id));
 
         if (reservation.getStatus() == ReservationStatus.PENDING) {
-            Inventory inventory = inventoryRepository.lockByProductId(reservation.getProductId())
-                    .orElseThrow(() -> new IllegalStateException("Inventory missing for product " + reservation.getProductId()));
-            inventory.setAvailableQty(inventory.getAvailableQty() + reservation.getQty());
-            inventory.setReservedQty(inventory.getReservedQty() - reservation.getQty());
-            inventoryRepository.save(inventory);
-            productService.evict(reservation.getProductId());
+            releaseStock(reservation);
         }
 
         reservation.setStatus(ReservationStatus.CANCELLED);
         return toResponse(reservation);
+    }
+
+    @Transactional
+    public void expireIfPending(Long id) {
+        Reservation reservation = reservationRepository.findById(id).orElse(null);
+        if (reservation == null || reservation.getStatus() != ReservationStatus.PENDING) {
+            return;
+        }
+        releaseStock(reservation);
+        reservation.setStatus(ReservationStatus.EXPIRED);
+    }
+
+    private void releaseStock(Reservation reservation) {
+        Inventory inventory = inventoryRepository.lockByProductId(reservation.getProductId())
+                .orElseThrow(() -> new IllegalStateException("Inventory missing for product " + reservation.getProductId()));
+        inventory.setAvailableQty(inventory.getAvailableQty() + reservation.getQty());
+        inventory.setReservedQty(inventory.getReservedQty() - reservation.getQty());
+        inventoryRepository.save(inventory);
+        productService.evict(reservation.getProductId());
     }
 
     private ReservationResponse toResponse(Reservation r) {
