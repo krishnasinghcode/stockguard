@@ -3,9 +3,9 @@ spring:
     name: stockguard
 
   datasource:
-    url: jdbc:postgresql://127.0.0.1:5432/stockguard
-    username: stockguard
-    password: stockguard
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://127.0.0.1:5432/stockguard}
+    username: ${SPRING_DATASOURCE_USERNAME:stockguard}
+    password: ${SPRING_DATASOURCE_PASSWORD:stockguard}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -19,13 +19,20 @@ spring:
 
   data:
     redis:
-      host: 127.0.0.1
-      port: 6379
+      host: ${SPRING_DATA_REDIS_HOST:127.0.0.1}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      ssl:
+        enabled: ${SPRING_DATA_REDIS_SSL_ENABLED:false}
+
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:127.0.0.1}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:guest}
+    password: ${SPRING_RABBITMQ_PASSWORD:guest}
+    virtual-host: ${SPRING_RABBITMQ_VHOST:/}
+    ssl:
+      enabled: ${SPRING_RABBITMQ_SSL_ENABLED:false}
 
 server:
-  port: 8080
-
-aws:
-  region: us-east-1
-  sqs:
-    queue-url: "REPLACE_ME"
+  port: ${PORT:8080}
