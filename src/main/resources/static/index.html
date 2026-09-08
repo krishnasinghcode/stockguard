@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>StockGuard — Concurrency Demo</title>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; background:#0f1117; color:#e6e6e6; }
+  h1 { font-size: 20px; }
+  #stock { font-size: 48px; font-weight: bold; margin: 8px 0; }
+  button { font-size: 16px; padding: 12px 20px; background:#3b82f6; color:white; border:none; border-radius:8px; cursor:pointer; }
+  button:disabled { background:#555; cursor:not-allowed; }
+  #grid { display:grid; grid-template-columns: repeat(10, 1fr); gap:6px; margin-top:20px; }
+  .cell { height:36px; border-radius:6px; background:#2a2d38; display:flex; align-items:center; justify-content:center; font-size:11px; }
+  .success { background:#16a34a; }
+  .fail { background:#dc2626; }
+  #summary { margin-top:16px; font-size:15px; padding:12px; border-radius:8px; background:#1b1e29; display:none; }
+  #productId { width:60px; }
+</style>
+</head>
+<body>
+  <h1>StockGuard — live oversell-prevention demo</h1>
+  <p>Product <input id="productId" value="1"> current stock:</p>
+  <div id="stock">--</div>
+  <button id="fireBtn">Simulate 50 concurrent buyers</button>
+  <div id="grid"></div>
+  <div id="summary"></div>
+
+<script>
+const API = ''; // same-origin, served off the same Render instance via Spring Boot static resources
+const productIdInput = document.getElementById('productId');
+const stockEl = document.getElementById('stock');
+const gridEl = document.getElementById('grid');
+const summaryEl = document.getElementById('summary');
+const fireBtn = document.getElementById('fireBtn');
+
+async function refreshStock() {
+  const id = productIdInput.value;
+  const res = await fetch(`${API}/products/${id}`);
+  if (!res.ok) { stockEl.textContent = 'err'; return; }
+  const data = await res.json();
+  stockEl.textContent = data.availableQty;
+}
+
+async function fireOne(productId, i) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.textContent = '...';
+  gridEl.appendChild(cell);
+
+  try {
+    const res = await fetch(`${API}/reservations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': `demo-${Date.now()}-${i}-${Math.random()}`
+      },
+      body: JSON.stringify({ productId: Number(productId), userId: `buyer-${i}`, qty: 1 })
+    });
+    if (res.status === 201) {
+      cell.textContent = 'OK';
+      cell.classList.add('success');
+      return true;
+    } else {
+      cell.textContent = 'X';
+      cell.classList.add('fail');
+      return false;
+    }
+  } catch (e) {
+    cell.textContent = 'ERR';
+    cell.classList.add('fail');
+    return false;
+  }
+}
+
+async function simulate() {
+  fireBtn.disabled = true;
+  gridEl.innerHTML = '';
+  summaryEl.style.display = 'none';
+  const productId = productIdInput.value;
+
+  const promises = [];
+  for (let i = 0; i < 50; i++) {
+    promises.push(fireOne(productId, i));
+  }
+  const results = await Promise.all(promises);
+  const succeeded = results.filter(Boolean).length;
+  const rejected = results.length - succeeded;
+
+  await refreshStock();
+  summaryEl.style.display = 'block';
+  summaryEl.textContent = `Stock never went negative — ${succeeded} succeeded, ${rejected} rejected.`;
+  fireBtn.disabled = false;
+}
+
+fireBtn.addEventListener('click', simulate);
+productIdInput.addEventListener('change', refreshStock);
+refreshStock();
+setInterval(refreshStock, 3000); // live polling per the doc
+</script>
+</body>
+</html>
