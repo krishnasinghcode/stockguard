@@ -17,6 +17,7 @@ export const options = {
   thresholds: {
     http_req_duration: ['p(95)<2000'],
   },
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
 
 const successCount = new Counter('reservation_success');
